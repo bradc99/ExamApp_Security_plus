@@ -7,7 +7,6 @@ export default function HomePage() {
   const router = useRouter();
   const [count, setCount] = useState(10);
   const [mode, setMode] = useState("EXAM");
-  const [durationMin, setDurationMin] = useState(30);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
 
@@ -24,7 +23,6 @@ export default function HomePage() {
         body: JSON.stringify({
           count,
           mode,
-          durationMin,
         }),
       });
 
@@ -65,18 +63,7 @@ export default function HomePage() {
             type="number"
             min={1}
             value={count}
-            onChange={(e) => setCount(Math.max(1, Number(e.target.value) || 1))}
-            className="w-full rounded border px-3 py-2"
-          />
-        </div>
-
-        <div>
-          <label className="mb-1 block text-sm font-medium">Duration (minutes)</label>
-          <input
-            type="number"
-            min={1}
-            value={durationMin}
-            onChange={(e) => setDurationMin(Math.max(1, Number(e.target.value) || 1))}
+            onChange={(e) => setCount(Number(e.target.value))}
             className="w-full rounded border px-3 py-2"
           />
         </div>

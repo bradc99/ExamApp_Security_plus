@@ -1,56 +1,81 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/app/lib/prisma";
 
+function shuffleArray<T>(items: T[]) {
+  const arr = [...items];
+  for (let i = arr.length - 1; i > 0; i -= 1) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [arr[i], arr[j]] = [arr[j], arr[i]];
+  }
+  return arr;
+}
+
 export async function POST(req: Request) {
   try {
     const body = await req.json().catch(() => ({}));
-    const mode = String(body.mode ?? "EXAM").toUpperCase(); // EXAM|PRACTICE
+
+    const rawMode = String(body.mode ?? "EXAM").toUpperCase();
+    const mode = rawMode === "PRACTICE" ? "PRACTICE" : "EXAM";
     const count = Math.max(1, Number(body.count ?? 20) || 20);
+    const durationMin = Math.max(1, Number(body.durationMin ?? 30) || 30);
 
     const total = await prisma.question.count();
     if (total === 0) {
       return NextResponse.json(
         { ok: false, error: "No questions in database" },
-        { status: 400 }
+        { status: 400 },
       );
     }
 
-    const all = await prisma.question.findMany({ select: { id: true } });
-    const selected = all
-      .sort(() => Math.random() - 0.5)
-      .slice(0, Math.min(count, all.length));
+    const all = await prisma.question.findMany({
+      select: { id: true },
+    });
+
+    const selected = shuffleArray(all).slice(0, Math.min(count, all.length));
     const questionIds = selected.map((q) => q.id);
 
-    const exam = await prisma.exam.create({
-      data: {
-        mode: mode as any,
-        settings: JSON.stringify({ count }),
-      },
-    });
+    const result = await prisma.$transaction(async (tx) => {
+      const exam = await tx.exam.create({
+        data: {
+          mode,
+          settings: JSON.stringify({
+            count: questionIds.length,
+            questionIds,
+            durationMin,
+          }),
+        },
+      });
 
-    const attempt = await prisma.attempt.create({
-      data: {
-        examId: exam.id,
-      },
-    });
+      const attempt = await tx.attempt.create({
+        data: {
+          examId: exam.id,
+        },
+      });
 
-    await prisma.attemptAnswer.createMany({
-      data: questionIds.map((qid) => ({
-        attemptId: attempt.id,
-        questionId: qid,
-      })),
+      for (const qid of questionIds) {
+        await tx.attemptAnswer.create({
+          data: {
+            attemptId: attempt.id,
+            questionId: qid,
+          },
+        });
+      }
+
+      return { exam, attempt };
     });
 
     return NextResponse.json({
       ok: true,
-      examId: exam.id,
-      attemptId: attempt.id,
+      examId: result.exam.id,
+      attemptId: result.attempt.id,
+      questionCount: questionIds.length,
+      mode,
     });
   } catch (err: any) {
     console.error("POST /api/exam/generate error:", err);
     return NextResponse.json(
       { ok: false, error: err?.message ?? String(err) },
-      { status: 500 }
+      { status: 500 },
     );
   }
 }

@@ -20,36 +20,10 @@ export async function POST(req: Request) {
       );
     }
 
-    const attempt = await prisma.attempt.findUnique({
-      where: { id: attemptId },
-      include: {
-        exam: true,
-      },
-    });
-
-    if (!attempt) {
-      return NextResponse.json(
-        { ok: false, error: "Attempt not found" },
-        { status: 404 }
-      );
-    }
-
-    if (attempt.finishedAt) {
-      return NextResponse.json({
-        ok: true,
-        score: attempt.score ?? 0,
-        alreadyFinished: true,
-      });
-    }
-
     const answers = await prisma.attemptAnswer.findMany({
       where: { attemptId },
       include: {
-        question: {
-          include: {
-            correct: true,
-          },
-        },
+        question: { include: { correct: true } },
         selected: true,
       },
     });
@@ -58,20 +32,14 @@ export async function POST(req: Request) {
     let gradableCount = 0;
 
     for (const a of answers) {
-      if (a.question.type !== "MCQ" && a.question.type !== "MULTI") {
-        continue;
-      }
-
+      if (a.question.type !== "MCQ" && a.question.type !== "MULTI") continue;
       gradableCount += 1;
 
       const selectedIds = a.selected.map((s) => s.choiceId);
       const correctIds = a.question.correct.map((c) => c.choiceId);
 
       const ok = arraysEqual(selectedIds, correctIds);
-
-      if (ok) {
-        correctCount += 1;
-      }
+      if (ok) correctCount += 1;
 
       await prisma.attemptAnswer.update({
         where: { id: a.id },
@@ -79,33 +47,21 @@ export async function POST(req: Request) {
       });
     }
 
-    const score = gradableCount > 0 ? (correctCount / gradableCount) * 100 : 0;
-    const finishedAt = new Date();
-    const timeTakenS = Math.max(
-      0,
-      Math.floor((finishedAt.getTime() - attempt.startedAt.getTime()) / 1000)
-    );
+    const score = gradableCount ? (correctCount / gradableCount) * 100 : 0;
 
     await prisma.attempt.update({
       where: { id: attemptId },
       data: {
-        finishedAt,
+        finishedAt: new Date(),
         score,
-        timeTakenS,
       },
     });
 
-    return NextResponse.json({
-      ok: true,
-      score,
-      correctCount,
-      gradableCount,
-      timeTakenS,
-    });
+    return NextResponse.json({ ok: true, score, correctCount, gradableCount });
   } catch (err: any) {
     console.error("POST /api/exam/finish error:", err);
     return NextResponse.json(
-      { ok: false, error: err?.message ?? "Failed to finish exam" },
+      { ok: false, error: err?.message ?? String(err) },
       { status: 500 }
     );
   }

@@ -20,13 +20,6 @@ export async function GET(
       );
     }
 
-    let settings: Record<string, unknown> = {};
-    try {
-      settings = JSON.parse(attempt.exam.settings || "{}");
-    } catch {
-      settings = {};
-    }
-
     const answers = await prisma.attemptAnswer.findMany({
       where: { attemptId },
       orderBy: { createdAt: "asc" },
@@ -52,32 +45,30 @@ export async function GET(
       prompt: a.question.prompt,
       explanation: a.question.explanation,
       tags: a.question.tags,
+      // send choices as real arrays (no JSON text)
       choices: a.question.choices.map((c) => ({
         id: c.id,
-        label: c.label,
         text: c.text,
         order: c.order,
       })),
+      // user selections
       selectedChoiceIds: a.selected.map((s) => s.choiceId),
+      // PBQ items
       pbqItems: a.question.pbqItems.map((p) => ({
         text: p.text,
         order: p.order,
       })),
-      pbqText: a.pbqText ?? "",
+      pbqText: a.pbqText ?? null,
     }));
 
     return NextResponse.json({
       ok: true,
       attemptId: attempt.id,
       mode: attempt.exam.mode,
-      settings,
-      startedAt: attempt.startedAt,
       finishedAt: attempt.finishedAt,
       score: attempt.score,
-      timeTakenS: attempt.timeTakenS,
       questions,
     });
-    
   } catch (err: any) {
     console.error("GET /api/attempt/[id] error:", err);
     return NextResponse.json(
