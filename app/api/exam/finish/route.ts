@@ -22,9 +22,6 @@ export async function POST(req: Request) {
 
     const attempt = await prisma.attempt.findUnique({
       where: { id: attemptId },
-      include: {
-        exam: true,
-      },
     });
 
     if (!attempt) {
@@ -45,11 +42,7 @@ export async function POST(req: Request) {
     const answers = await prisma.attemptAnswer.findMany({
       where: { attemptId },
       include: {
-        question: {
-          include: {
-            correct: true,
-          },
-        },
+        question: { include: { correct: true } },
         selected: true,
       },
     });
@@ -58,9 +51,7 @@ export async function POST(req: Request) {
     let gradableCount = 0;
 
     for (const a of answers) {
-      if (a.question.type !== "MCQ" && a.question.type !== "MULTI") {
-        continue;
-      }
+      if (a.question.type !== "MCQ" && a.question.type !== "MULTI") continue;
 
       gradableCount += 1;
 
@@ -69,9 +60,7 @@ export async function POST(req: Request) {
 
       const ok = arraysEqual(selectedIds, correctIds);
 
-      if (ok) {
-        correctCount += 1;
-      }
+      if (ok) correctCount += 1;
 
       await prisma.attemptAnswer.update({
         where: { id: a.id },
@@ -105,7 +94,7 @@ export async function POST(req: Request) {
   } catch (err: any) {
     console.error("POST /api/exam/finish error:", err);
     return NextResponse.json(
-      { ok: false, error: err?.message ?? "Failed to finish exam" },
+      { ok: false, error: err?.message ?? String(err) },
       { status: 500 }
     );
   }

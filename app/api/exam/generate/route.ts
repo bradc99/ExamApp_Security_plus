@@ -23,7 +23,7 @@ export async function POST(req: Request) {
     if (total === 0) {
       return NextResponse.json(
         { ok: false, error: "No questions in database" },
-        { status: 400 },
+        { status: 400 }
       );
     }
 
@@ -70,12 +70,13 @@ export async function POST(req: Request) {
       attemptId: result.attempt.id,
       questionCount: questionIds.length,
       mode,
+      durationMin,
     });
   } catch (err: any) {
     console.error("POST /api/exam/generate error:", err);
     return NextResponse.json(
       { ok: false, error: err?.message ?? String(err) },
-      { status: 500 },
+      { status: 500 }
     );
   }
 }

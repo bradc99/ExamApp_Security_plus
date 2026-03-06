@@ -1,7 +1,7 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
-import { useParams, useRouter } from "next/navigation";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { useParams } from "next/navigation";
 
 type Choice = {
   id: string;
@@ -32,18 +32,30 @@ type AttemptPayload = {
   mode: string;
   score: number | null;
   finishedAt: string | null;
+  startedAt: string;
+  durationMin: number;
+  remainingSeconds: number | null;
+  expiresAt: string | null;
   questions: Question[];
 };
 
+function formatSeconds(totalSeconds: number) {
+  const mins = Math.floor(totalSeconds / 60);
+  const secs = totalSeconds % 60;
+  return `${String(mins).padStart(2, "0")}:${String(secs).padStart(2, "0")}`;
+}
+
 export default function ExamAttemptPage() {
   const params = useParams<{ id: string }>();
-  const router = useRouter();
 
   const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
   const [payload, setPayload] = useState<AttemptPayload | null>(null);
   const [currentIndex, setCurrentIndex] = useState(0);
   const [error, setError] = useState("");
+  const [remainingSeconds, setRemainingSeconds] = useState<number | null>(null);
+
+  const autoFinishedRef = useRef(false);
 
   async function loadAttempt() {
     setLoading(true);
@@ -60,6 +72,7 @@ export default function ExamAttemptPage() {
       }
 
       setPayload(data);
+      setRemainingSeconds(data.remainingSeconds ?? null);
     } catch (err: any) {
       setError(err?.message || "Failed to load attempt");
     } finally {
@@ -74,6 +87,30 @@ export default function ExamAttemptPage() {
   const currentQuestion = useMemo(() => {
     return payload?.questions?.[currentIndex] ?? null;
   }, [payload, currentIndex]);
+
+  const isFinished = Boolean(payload?.finishedAt);
+
+  useEffect(() => {
+    if (!payload || isFinished || remainingSeconds === null) return;
+
+    const interval = setInterval(() => {
+      setRemainingSeconds((prev) => {
+        if (prev === null) return prev;
+        return Math.max(0, prev - 1);
+      });
+    }, 1000);
+
+    return () => clearInterval(interval);
+  }, [payload, isFinished, remainingSeconds]);
+
+  useEffect(() => {
+    if (!payload || isFinished) return;
+    if (remainingSeconds !== 0) return;
+    if (autoFinishedRef.current) return;
+
+    autoFinishedRef.current = true;
+    void handleFinish(true);
+  }, [remainingSeconds, payload, isFinished]);
 
   async function saveAnswer(nextSelectedIds: string[], pbqText = "") {
     if (!currentQuestion || !payload || payload.finishedAt) return;
@@ -112,7 +149,7 @@ export default function ExamAttemptPage() {
   }
 
   async function handleChoiceClick(choiceId: string) {
-    if (!currentQuestion) return;
+    if (!currentQuestion || isFinished) return;
 
     try {
       if (currentQuestion.type === "MCQ") {
@@ -133,36 +170,43 @@ export default function ExamAttemptPage() {
     }
   }
 
-  async function handleFinish() {
-    if (!payload) return;
+  async function handleFinish(isAuto = false) {
+  if (!payload) return;
 
-    setSubmitting(true);
-    setError("");
+  setSubmitting(true);
+  setError("");
 
-    try {
-      const res = await fetch("/api/exam/finish", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          attemptId: payload.attemptId,
-        }),
-      });
+  try {
+    const res = await fetch("/api/exam/finish", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        attemptId: payload.attemptId,
+      }),
+    });
 
-      const data = await res.json();
+    const data = await res.json();
+    console.log("finish response:", data);
 
-      if (!res.ok || !data.ok) {
-        throw new Error(data.error || "Failed to finish exam");
-      }
-
-      await loadAttempt();
-    } catch (err: any) {
-      setError(err?.message || "Failed to finish exam");
-    } finally {
-      setSubmitting(false);
+    if (!res.ok || !data.ok) {
+      throw new Error(data.error || "Failed to finish exam");
     }
+
+    const target = isAuto
+      ? `/results/${payload.attemptId}?auto=1`
+      : `/results/${payload.attemptId}`;
+
+    console.log("redirecting to:", target);
+    router.push(target);
+  } catch (err: any) {
+    console.error("handleFinish error:", err);
+    setError(err?.message || "Failed to finish exam");
+  } finally {
+    setSubmitting(false);
   }
+}
 
   if (loading) {
     return <div className="p-6">Loading attempt...</div>;
@@ -176,8 +220,6 @@ export default function ExamAttemptPage() {
     return <div className="p-6">No attempt data found.</div>;
   }
 
-  const isFinished = Boolean(payload.finishedAt);
-
   return (
     <main className="mx-auto max-w-4xl p-6">
       <div className="mb-6 flex items-center justify-between gap-4">
@@ -186,16 +228,25 @@ export default function ExamAttemptPage() {
           <p className="text-sm text-gray-600">
             Mode: {payload.mode} | Question {currentIndex + 1} of {payload.questions.length}
           </p>
+          <p className="text-sm text-gray-600">
+            Duration: {payload.durationMin} min
+          </p>
         </div>
 
         <div className="text-right">
+          {remainingSeconds !== null && !isFinished ? (
+            <div className="mb-2 text-lg font-semibold">
+              Time Left: {formatSeconds(remainingSeconds)}
+            </div>
+          ) : null}
+
           {isFinished ? (
             <div className="text-sm font-medium">
               Score: {payload.score ?? 0}%
             </div>
           ) : (
             <button
-              onClick={handleFinish}
+              onClick={() => handleFinish(false)}
               disabled={submitting}
               className="rounded border px-4 py-2"
             >

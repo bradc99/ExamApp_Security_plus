@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 
 type Choice = {
@@ -32,16 +32,14 @@ type AttemptPayload = {
   mode: string;
   score: number | null;
   finishedAt: string | null;
-  startedAt?: string;
-  settings?: {
-    durationMin?: number;
-    [key: string]: any;
-  };
+  startedAt: string;
+  durationMin: number;
+  remainingSeconds: number | null;
+  expiresAt: string | null;
   questions: Question[];
-  timeTakenS?: number | null;
 };
 
-function formatTime(totalSeconds: number) {
+function formatSeconds(totalSeconds: number) {
   const mins = Math.floor(totalSeconds / 60);
   const secs = totalSeconds % 60;
   return `${String(mins).padStart(2, "0")}:${String(secs).padStart(2, "0")}`;
@@ -57,10 +55,8 @@ export default function ExamAttemptPage() {
   const [currentIndex, setCurrentIndex] = useState(0);
   const [error, setError] = useState("");
   const [remainingSeconds, setRemainingSeconds] = useState<number | null>(null);
-  const [autoFinishing, setAutoFinishing] = useState(false);
-  const [showReviewModal, setShowReviewModal] = useState(false);
-  const [pbqDraft, setPbqDraft] = useState("");
-  const [pbqSaving, setPbqSaving] = useState(false);
+
+  const autoFinishedRef = useRef(false);
 
   async function loadAttempt() {
     setLoading(true);
@@ -77,6 +73,7 @@ export default function ExamAttemptPage() {
       }
 
       setPayload(data);
+      setRemainingSeconds(data.remainingSeconds ?? null);
     } catch (err: any) {
       setError(err?.message || "Failed to load attempt");
     } finally {
@@ -92,89 +89,31 @@ export default function ExamAttemptPage() {
     return payload?.questions?.[currentIndex] ?? null;
   }, [payload, currentIndex]);
 
-  useEffect(() => {
-    setPbqDraft(currentQuestion?.pbqText ?? "");
-  }, [currentQuestion?.attemptAnswerId, currentQuestion?.pbqText]);
-
-  const unansweredCount = useMemo(() => {
-    if (!payload) return 0;
-
-    return payload.questions.filter((q) => {
-      const answered =
-        q.selectedChoiceIds.length > 0 ||
-        (q.pbqText && q.pbqText.trim().length > 0);
-      return !answered;
-    }).length;
-  }, [payload]);
-
   const isFinished = Boolean(payload?.finishedAt);
-  const isPracticeMode =
-    String(payload?.mode ?? "").trim().toUpperCase() === "PRACTICE";
 
   useEffect(() => {
-    if (!payload?.startedAt || payload?.finishedAt) {
-      setRemainingSeconds(null);
-      return;
-    }
+    if (!payload || isFinished || remainingSeconds === null) return;
 
-    const durationMin = Number(payload?.settings?.durationMin ?? 0);
-
-    if (!durationMin || durationMin < 1) {
-      setRemainingSeconds(null);
-      return;
-    }
-
-    const startedAtMs = new Date(payload.startedAt).getTime();
-    const durationMs = durationMin * 60 * 1000;
-
-    const tick = () => {
-      const now = Date.now();
-      const endAt = startedAtMs + durationMs;
-      const remaining = Math.max(0, Math.floor((endAt - now) / 1000));
-      setRemainingSeconds(remaining);
-    };
-
-    tick();
-    const interval = setInterval(tick, 1000);
+    const interval = setInterval(() => {
+      setRemainingSeconds((prev) => {
+        if (prev === null) return prev;
+        return Math.max(0, prev - 1);
+      });
+    }, 1000);
 
     return () => clearInterval(interval);
-  }, [payload?.startedAt, payload?.finishedAt, payload?.settings?.durationMin]);
+  }, [payload, isFinished, remainingSeconds]);
 
   useEffect(() => {
-    if (!payload || payload.finishedAt) return;
-    if (remainingSeconds === null) return;
-    if (remainingSeconds > 0) return;
-    if (autoFinishing) return;
+    if (!payload || isFinished) return;
+    if (remainingSeconds !== 0) return;
+    if (autoFinishedRef.current) return;
 
-    setAutoFinishing(true);
+    autoFinishedRef.current = true;
+    void handleFinish(true);
+  }, [remainingSeconds, payload, isFinished]);
 
-    (async () => {
-      try {
-        const res = await fetch("/api/exam/finish", {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-          },
-          body: JSON.stringify({
-            attemptId: payload.attemptId,
-          }),
-        });
-
-        const data = await res.json();
-
-        if (!res.ok || !data.ok) {
-          throw new Error(data.error || "Failed to auto-finish exam");
-        }
-
-        router.push(`/results/${payload.attemptId}`);
-      } catch (err: any) {
-        setError(err?.message || "Failed to auto-finish exam");
-        setAutoFinishing(false);
-      }
-    })();
-  }, [remainingSeconds, payload, autoFinishing, router]);
-
-  async function saveAnswer(nextSelectedIds: string[], nextPbqText = "") {
+  async function saveAnswer(nextSelectedIds: string[], pbqText = "") {
     if (!currentQuestion || !payload || payload.finishedAt) return;
 
     const res = await fetch("/api/attempt/answer", {
@@ -185,7 +124,7 @@ export default function ExamAttemptPage() {
       body: JSON.stringify({
         attemptAnswerId: currentQuestion.attemptAnswerId,
         selectedChoiceIds: nextSelectedIds,
-        pbqText: nextPbqText,
+        pbqText,
       }),
     });
 
@@ -202,11 +141,8 @@ export default function ExamAttemptPage() {
       questions[currentIndex] = {
         ...questions[currentIndex],
         selectedChoiceIds: nextSelectedIds,
-        pbqText: nextPbqText,
-        isCorrect:
-          typeof data.isCorrect === "boolean"
-            ? data.isCorrect
-            : questions[currentIndex].isCorrect,
+        pbqText,
+        isCorrect: data.isCorrect ?? questions[currentIndex].isCorrect,
       };
 
       return { ...prev, questions };
@@ -214,7 +150,7 @@ export default function ExamAttemptPage() {
   }
 
   async function handleChoiceClick(choiceId: string) {
-    if (!currentQuestion) return;
+    if (!currentQuestion || isFinished) return;
 
     try {
       if (currentQuestion.type === "MCQ") {
@@ -235,7 +171,7 @@ export default function ExamAttemptPage() {
     }
   }
 
-  async function handleFinish() {
+  async function handleFinish(isAuto = false) {
     if (!payload) return;
 
     setSubmitting(true);
@@ -253,17 +189,23 @@ export default function ExamAttemptPage() {
       });
 
       const data = await res.json();
+      console.log("finish response:", data);
 
       if (!res.ok || !data.ok) {
         throw new Error(data.error || "Failed to finish exam");
       }
 
-      router.push(`/results/${payload.attemptId}`);
+      const target = isAuto
+        ? `/results/${payload.attemptId}?auto=1`
+        : `/results/${payload.attemptId}`;
+
+      console.log("redirecting to:", target);
+      router.push(target);
     } catch (err: any) {
+      console.error("handleFinish error:", err);
       setError(err?.message || "Failed to finish exam");
     } finally {
       setSubmitting(false);
-      setShowReviewModal(false);
     }
   }
 
@@ -288,12 +230,15 @@ export default function ExamAttemptPage() {
             Mode: {payload.mode} | Question {currentIndex + 1} of{" "}
             {payload.questions.length}
           </p>
+          <p className="text-sm text-gray-600">
+            Duration: {payload.durationMin} min
+          </p>
         </div>
 
         <div className="text-right">
           {remainingSeconds !== null && !isFinished ? (
-            <div className="mb-2 text-sm font-medium">
-              Time Left: {formatTime(remainingSeconds)}
+            <div className="mb-2 text-lg font-semibold">
+              Time Left: {formatSeconds(remainingSeconds)}
             </div>
           ) : null}
 
@@ -303,15 +248,11 @@ export default function ExamAttemptPage() {
             </div>
           ) : (
             <button
-              onClick={() => setShowReviewModal(true)}
-              disabled={submitting || autoFinishing}
+              onClick={() => handleFinish(false)}
+              disabled={submitting}
               className="rounded border px-4 py-2"
             >
-              {submitting
-                ? "Finishing..."
-                : autoFinishing
-                ? "Auto-finishing..."
-                : "Finish Exam"}
+              {submitting ? "Finishing..." : "Finish Exam"}
             </button>
           )}
         </div>
@@ -330,7 +271,7 @@ export default function ExamAttemptPage() {
               key={q.attemptAnswerId}
               onClick={() => setCurrentIndex(idx)}
               className={`rounded border px-3 py-1 text-sm ${
-                idx === currentIndex ? "border-black font-semibold" : ""
+                idx === currentIndex ? "font-semibold" : ""
               }`}
             >
               Q{idx + 1} {answered ? "✓" : ""}
@@ -350,7 +291,8 @@ export default function ExamAttemptPage() {
 
         <h2 className="mb-4 text-xl font-medium">{currentQuestion.prompt}</h2>
 
-        {(currentQuestion.type === "MCQ" || currentQuestion.type === "MULTI") && (
+        {(currentQuestion.type === "MCQ" ||
+          currentQuestion.type === "MULTI") && (
           <div className="space-y-3">
             {currentQuestion.choices.map((choice) => {
               const selected = currentQuestion.selectedChoiceIds.includes(
@@ -374,25 +316,6 @@ export default function ExamAttemptPage() {
           </div>
         )}
 
-        {isPracticeMode &&
-          !isFinished &&
-          (currentQuestion.type === "MCQ" ||
-            currentQuestion.type === "MULTI") &&
-          currentQuestion.selectedChoiceIds.length > 0 &&
-          currentQuestion.isCorrect !== null && (
-            <div className="mt-4 rounded border p-4">
-              <div className="font-medium">
-                {currentQuestion.isCorrect ? "Correct" : "Incorrect"}
-              </div>
-
-              {currentQuestion.explanation ? (
-                <div className="mt-2 text-sm text-gray-700">
-                  {currentQuestion.explanation}
-                </div>
-              ) : null}
-            </div>
-          )}
-
         {currentQuestion.type === "PBQ" && (
           <div>
             {currentQuestion.pbqItems.length > 0 && (
@@ -406,31 +329,19 @@ export default function ExamAttemptPage() {
             <textarea
               className="min-h-40 w-full rounded border p-3"
               placeholder="Type your answer here..."
-              value={pbqDraft}
+              defaultValue={currentQuestion.pbqText || ""}
               disabled={isFinished}
-              onChange={(e) => setPbqDraft(e.target.value)}
-              onBlur={async () => {
+              onBlur={async (e) => {
                 try {
-                  setPbqSaving(true);
                   await saveAnswer(
                     currentQuestion.selectedChoiceIds,
-                    pbqDraft
+                    e.currentTarget.value
                   );
                 } catch (err: any) {
                   setError(err?.message || "Failed to save PBQ answer");
-                } finally {
-                  setPbqSaving(false);
                 }
               }}
             />
-
-            {!isFinished && (
-              <div className="mt-2 text-sm text-gray-500">
-                {pbqSaving
-                  ? "Saving..."
-                  : "Your PBQ answer saves when you leave the box."}
-              </div>
-            )}
           </div>
         )}
 
@@ -463,61 +374,6 @@ export default function ExamAttemptPage() {
           Next
         </button>
       </div>
-
-      {showReviewModal && !isFinished && (
-        <div className="fixed inset-0 flex items-center justify-center bg-black/40 p-4">
-          <div className="w-full max-w-md rounded border bg-white p-5">
-            <h2 className="mb-3 text-xl font-semibold">Review Before Submit</h2>
-
-            <p className="mb-2">
-              Total questions: <b>{payload.questions.length}</b>
-            </p>
-            <p className="mb-4">
-              Unanswered questions: <b>{unansweredCount}</b>
-            </p>
-
-            <div className="mb-4 max-h-48 overflow-auto rounded border p-3">
-              <div className="flex flex-wrap gap-2">
-                {payload.questions.map((q, idx) => {
-                  const answered =
-                    q.selectedChoiceIds.length > 0 ||
-                    (q.pbqText && q.pbqText.trim().length > 0);
-
-                  return (
-                    <button
-                      key={q.attemptAnswerId}
-                      onClick={() => {
-                        setCurrentIndex(idx);
-                        setShowReviewModal(false);
-                      }}
-                      className="rounded border px-3 py-1 text-sm"
-                    >
-                      Q{idx + 1} {answered ? "✓" : "•"}
-                    </button>
-                  );
-                })}
-              </div>
-            </div>
-
-            <div className="flex justify-end gap-2">
-              <button
-                onClick={() => setShowReviewModal(false)}
-                className="rounded border px-4 py-2"
-              >
-                Cancel
-              </button>
-
-              <button
-                onClick={handleFinish}
-                disabled={submitting}
-                className="rounded border px-4 py-2"
-              >
-                {submitting ? "Finishing..." : "Confirm Submit"}
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
     </main>
   );
 }

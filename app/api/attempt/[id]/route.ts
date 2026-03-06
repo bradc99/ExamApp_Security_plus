@@ -1,5 +1,12 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/app/lib/prisma";
+import {
+  getDurationMin,
+  getExpiresAt,
+  getRemainingSeconds,
+  isAttemptExpired,
+  parseExamSettings,
+} from "@/app/lib/examTiming";
 
 export async function GET(
   _req: Request,
@@ -20,11 +27,26 @@ export async function GET(
       );
     }
 
-    let settings: Record<string, unknown> = {};
-    try {
-      settings = JSON.parse(attempt.exam.settings || "{}");
-    } catch {
-      settings = {};
+    const settings = parseExamSettings(attempt.exam.settings);
+    const durationMin = getDurationMin(attempt.exam.settings);
+
+    if (!attempt.finishedAt && isAttemptExpired(attempt.startedAt, durationMin)) {
+      const finishedAt = new Date();
+      const timeTakenS = Math.max(
+        0,
+        Math.floor((finishedAt.getTime() - attempt.startedAt.getTime()) / 1000)
+      );
+
+      await prisma.attempt.update({
+        where: { id: attempt.id },
+        data: {
+          finishedAt,
+          timeTakenS,
+        },
+      });
+
+      attempt.finishedAt = finishedAt;
+      attempt.timeTakenS = timeTakenS;
     }
 
     const answers = await prisma.attemptAnswer.findMany({
@@ -71,13 +93,18 @@ export async function GET(
       attemptId: attempt.id,
       mode: attempt.exam.mode,
       settings,
+      durationMin,
+      remainingSeconds: attempt.finishedAt
+        ? 0
+        : getRemainingSeconds(attempt.startedAt, durationMin),
+      expiresAt:
+        durationMin > 0 ? getExpiresAt(attempt.startedAt, durationMin).toISOString() : null,
       startedAt: attempt.startedAt,
       finishedAt: attempt.finishedAt,
       score: attempt.score,
       timeTakenS: attempt.timeTakenS,
       questions,
     });
-    
   } catch (err: any) {
     console.error("GET /api/attempt/[id] error:", err);
     return NextResponse.json(

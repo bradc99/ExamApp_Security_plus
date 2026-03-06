@@ -1,8 +1,9 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/app/lib/prisma";
+import { getDurationMin, isAttemptExpired } from "@/app/lib/examTiming";
 
 type Body = {
-  attemptAnswerId?: string;
+  attemptAnswerId: string;
   selectedChoiceIds?: string[];
   pbqText?: string;
 };
@@ -29,11 +30,7 @@ export async function POST(req: Request) {
     const row = await prisma.attemptAnswer.findUnique({
       where: { id: attemptAnswerId },
       include: {
-        attempt: {
-          include: {
-            exam: true,
-          },
-        },
+        attempt: { include: { exam: true } },
         question: {
           include: {
             correct: true,
@@ -58,24 +55,27 @@ export async function POST(req: Request) {
       );
     }
 
-    let durationMin = 0;
-    try {
-      const settings = JSON.parse(row.attempt.exam.settings || "{}");
-      durationMin = Number(settings.durationMin ?? 0);
-    } catch {
-      durationMin = 0;
-    }
+    const durationMin = getDurationMin(row.attempt.exam.settings);
 
-    if (durationMin > 0) {
-      const expiresAt =
-        new Date(row.attempt.startedAt).getTime() + durationMin * 60 * 1000;
+    if (isAttemptExpired(row.attempt.startedAt, durationMin)) {
+      const finishedAt = new Date();
+      const timeTakenS = Math.max(
+        0,
+        Math.floor((finishedAt.getTime() - row.attempt.startedAt.getTime()) / 1000)
+      );
 
-      if (Date.now() > expiresAt) {
-        return NextResponse.json(
-          { ok: false, error: "Time is up for this attempt" },
-          { status: 400 }
-        );
-      }
+      await prisma.attempt.update({
+        where: { id: row.attempt.id },
+        data: {
+          finishedAt,
+          timeTakenS,
+        },
+      });
+
+      return NextResponse.json(
+        { ok: false, error: "Time is up. This attempt has expired." },
+        { status: 400 }
+      );
     }
 
     const selectedChoiceIdsRaw = Array.isArray(body.selectedChoiceIds)
@@ -85,16 +85,11 @@ export async function POST(req: Request) {
     const selectedChoiceIds = [...new Set(selectedChoiceIdsRaw)];
 
     const validChoiceIds = new Set(row.question.choices.map((c) => c.id));
-    const invalidChoiceIds = selectedChoiceIds.filter(
-      (id) => !validChoiceIds.has(id)
-    );
+    const invalidChoiceIds = selectedChoiceIds.filter((id) => !validChoiceIds.has(id));
 
     if (invalidChoiceIds.length > 0) {
       return NextResponse.json(
-        {
-          ok: false,
-          error: "One or more selected choices do not belong to this question",
-        },
+        { ok: false, error: "One or more selected choices do not belong to this question" },
         { status: 400 }
       );
     }
@@ -119,14 +114,11 @@ export async function POST(req: Request) {
       });
     }
 
-    const pbqText =
-      typeof body.pbqText === "string" ? body.pbqText : row.pbqText ?? null;
+    const pbqText = typeof body.pbqText === "string" ? body.pbqText : null;
 
     let isCorrect: boolean | null = null;
 
-    const examMode = String(row.attempt.exam.mode ?? "").trim().toUpperCase();
-
-    if (examMode === "PRACTICE") {
+    if (row.attempt.exam.mode === "PRACTICE") {
       const correctChoiceIds = row.question.correct.map((c) => c.choiceId);
 
       if (row.question.type === "MCQ" || row.question.type === "MULTI") {
@@ -142,15 +134,11 @@ export async function POST(req: Request) {
       },
     });
 
-    return NextResponse.json({
-      ok: true,
-      isCorrect,
-      mode: examMode,
-    });
+    return NextResponse.json({ ok: true, isCorrect });
   } catch (err: any) {
     console.error("POST /api/attempt/answer error:", err);
     return NextResponse.json(
-      { ok: false, error: err?.message ?? "Failed to save answer" },
+      { ok: false, error: err?.message ?? String(err) },
       { status: 500 }
     );
   }

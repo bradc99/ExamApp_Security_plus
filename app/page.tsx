@@ -65,7 +65,7 @@ export default function HomePage() {
             type="number"
             min={1}
             value={count}
-            onChange={(e) => setCount(Math.max(1, Number(e.target.value) || 1))}
+            onChange={(e) => setCount(Number(e.target.value))}
             className="w-full rounded border px-3 py-2"
           />
         </div>
@@ -76,7 +76,7 @@ export default function HomePage() {
             type="number"
             min={1}
             value={durationMin}
-            onChange={(e) => setDurationMin(Math.max(1, Number(e.target.value) || 1))}
+            onChange={(e) => setDurationMin(Number(e.target.value))}
             className="w-full rounded border px-3 py-2"
           />
         </div>
