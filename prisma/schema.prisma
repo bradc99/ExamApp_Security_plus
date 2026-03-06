@@ -1,0 +1,144 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+
+
+model Question {
+  id          String   @id @default(cuid())
+  type        String   // "MCQ" | "MULTI" | "PBQ" | "CODE_PY_SCRIPT"
+  domain      String?
+  difficulty  String?
+  prompt      String
+  explanation String?
+  tags        String?
+
+  choices     Choice[]
+  correct     CorrectChoice[]
+  pbqItems    PbqItem[]
+
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  attemptAnswers AttemptAnswer[]
+  codeSubs       CodeSubmission[]
+}
+
+model Choice {
+  id         String   @id @default(cuid())
+  questionId String
+  question   Question @relation(fields: [questionId], references: [id], onDelete: Cascade)
+
+  label      String?  // optional: "A","B","C" etc.
+  text       String
+  order      Int
+
+  correctOf  CorrectChoice[]
+  selectedBy AttemptAnswerChoice[]
+
+  @@index([questionId])
+  @@unique([questionId, order])
+}
+
+model CorrectChoice {
+  id         String   @id @default(cuid())
+  questionId String
+  question   Question @relation(fields: [questionId], references: [id], onDelete: Cascade)
+
+  choiceId   String
+  choice     Choice   @relation(fields: [choiceId], references: [id], onDelete: Cascade)
+
+  @@index([questionId])
+  @@unique([questionId, choiceId])
+}
+
+model PbqItem {
+  id         String   @id @default(cuid())
+  questionId String
+  question   Question @relation(fields: [questionId], references: [id], onDelete: Cascade)
+
+  text       String
+  order      Int
+
+  @@index([questionId])
+  @@unique([questionId, order])
+}
+
+model Exam {
+  id        String   @id @default(cuid())
+  mode      String   // "PRACTICE" | "EXAM"
+  settings  String
+  createdAt DateTime @default(now())
+
+  attempts  Attempt[]
+}
+
+model Attempt {
+  id         String     @id @default(cuid())
+  examId     String
+  exam       Exam       @relation(fields: [examId], references: [id], onDelete: Cascade)
+
+  startedAt  DateTime   @default(now())
+  finishedAt DateTime?
+  score      Float?
+  timeTakenS Int?
+
+  answers    AttemptAnswer[]
+  codeSubs   CodeSubmission[]
+}
+
+model AttemptAnswer {
+  id         String   @id @default(cuid())
+  attemptId  String
+  attempt    Attempt  @relation(fields: [attemptId], references: [id], onDelete: Cascade)
+
+  questionId String
+  question   Question @relation(fields: [questionId], references: [id], onDelete: Cascade)
+
+  // selections stored relationally
+  selected   AttemptAnswerChoice[]
+
+  // for PBQ (order submission etc.) and other future types:
+  pbqText    String?
+
+  isCorrect  Boolean?
+  timeSpentS Int?
+
+  createdAt  DateTime @default(now())
+
+  @@unique([attemptId, questionId])
+}
+
+model AttemptAnswerChoice {
+  id             String        @id @default(cuid())
+  attemptAnswerId String
+  attemptAnswer   AttemptAnswer @relation(fields: [attemptAnswerId], references: [id], onDelete: Cascade)
+
+  choiceId       String
+  choice         Choice        @relation(fields: [choiceId], references: [id], onDelete: Cascade)
+
+  @@unique([attemptAnswerId, choiceId])
+}
+
+model CodeSubmission {
+  id          String   @id @default(cuid())
+  attemptId   String
+  attempt     Attempt  @relation(fields: [attemptId], references: [id], onDelete: Cascade)
+
+  questionId  String
+  question    Question @relation(fields: [questionId], references: [id], onDelete: Cascade)
+
+  language    String   // "python"
+  code        String
+  resultsJson String
+  passedCount Int
+  totalCount  Int
+  runtimeMs   Int?
+
+  createdAt   DateTime @default(now())
+}

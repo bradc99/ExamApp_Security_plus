@@ -1,0 +1,3 @@
+type,domain,difficulty,prompt,choices,answer_key,explanation,tags,pbq_json
+MCQ,Security,Easy,"What does CIA stand for?","Confidentiality|Integrity|Availability","Confidentiality","CIA triad basics","cia|basics",
+MCQ,Security,Easy,"What does MFA stand for?","Multi-factor authentication|Managed file access","Multi-factor authentication","MFA explanation","security|mfa",

@@ -1,0 +1,7 @@
+type,domain,difficulty,prompt,choices,answer_key,explanation,tags,pbq_json
+MCQ,Security,Easy,What does CIA stand for?,Confidentiality Integrity Availavility|Integrity|Availability,Confidentiality Integrity Availavility,"CIA triad = Confidentiality, Integrity, Availability.",cia|basics,
+MCQ,Security,Easy,What does MFA stand for?,Multi-factor authentication|Managed file access|Mobile function app,Multi-factor authentication,MFA means Multi-factor authentication.,security|mfa,
+MULTI,Security,Medium,Which are authentication factors? (Select all that apply),Something you know|Something you have|Something you are|Something you like,Something you know|Something you have|Something you are,"Common factors: knowledge, possession, inherence.",security|auth,
+MCQ,Networking,Easy,Which protocol is used for secure web browsing?,HTTP|FTP|SSH|HTTPS,HTTPS,HTTPS is HTTP over TLS/SSL.,web|tls,
+MCQ,Security,Easy,What does hashing provide?,Confidentiality|Integrity|Availability|Non-repudiation,Integrity,Hashing is used to verify data integrity.,hashing|basics,
+PBQ,Incident Response,Medium,Order the incident response steps (NIST),,,Standard incident response order.,security|ir,"{""kind"":""order"",""items"":[""Identify"",""Contain"",""Eradicate"",""Recover"",""Lessons learned""]}"

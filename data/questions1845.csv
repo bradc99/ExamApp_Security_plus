@@ -1,0 +1,4 @@
+type,domain,difficulty,prompt,choices,answer_key,explanation,tags
+MCQ,Security,Easy,What does CIA stand for?,Confidentiality|Integrity|Availability,0,CIA triad basics,cia|basics
+MCQ,Security,Easy,What does MFA stand for?,Multi-factor authentication|Managed file access,0,MFA explanation,security|mfa
+PBQ,Incident Response,Medium,Order the incident response steps,Identify|Contain|Eradicate|Recover,,Standard IR order,security|ir
